@@ -140,10 +140,11 @@ class CoinMarketCapAPI:
             logger.warning(f"Не удалось преобразовать {value} в Decimal: {e}")
             return default
 
-    def extract_token_data(self, symbol: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    def extract_token_data(self, symbol: str, token_data: Dict[str, Any]) -> Dict[str, Any]:
         """Извлечь данные токена из ответа API"""
         try:
-            token_data = data.get(symbol, {})
+            # ИСПРАВЛЕНИЕ: token_data уже содержит данные конкретного токена
+            # Не нужно искать по ключу symbol
             quote = token_data.get('quote', {}).get('USD', {})
 
             # Безопасное извлечение и преобразование данных
@@ -192,7 +193,8 @@ class CoinMarketCapAPI:
             result = {}
             for symbol in unique_symbols:
                 if symbol in quotes_data:
-                    result[symbol] = self.extract_token_data(symbol, quotes_data)
+                    # ИСПРАВЛЕНИЕ: передаем quotes_data[symbol] напрямую
+                    result[symbol] = self.extract_token_data(symbol, quotes_data[symbol])
                 else:
                     logger.warning(f"Данные для токена {symbol} не найдены в CoinMarketCap")
 
