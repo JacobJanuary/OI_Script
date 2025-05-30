@@ -169,3 +169,18 @@ class Database:
                             JOIN tokens t ON fp.token_id = t.id"""
             )
             return await cursor.fetchall()
+
+# Добавить этот метод в класс Database в файле db/database.py
+
+    async def save_spot_data(self, data: Dict[str, Any]):
+        """Сохранение данных о спотовой торговле"""
+        async with self.get_cursor() as cursor:
+            await cursor.execute(
+                """INSERT INTO spot_data
+                   (pair_id, volume_btc)
+                   VALUES (%s, %s)""",
+                (
+                    data['pair_id'],
+                    data.get('volume_btc')
+                )
+            )

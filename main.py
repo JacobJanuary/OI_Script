@@ -15,6 +15,7 @@ from utils.config import Config
 from utils.logger import logger
 from utils.converters import DataConverter
 
+
 class FuturesDataCollector:
     """Основной класс для сбора данных о фьючерсах"""
 
@@ -134,7 +135,7 @@ class FuturesDataCollector:
             return {}
 
     async def process_and_save_data(self, exchange_data: List[Dict[str, Any]],
-                                  cmc_data: Dict[str, Dict[str, Any]]):
+                                    cmc_data: Dict[str, Dict[str, Any]]):
         """Обработка и сохранение данных в БД"""
         logger.info("Обработка и сохранение данных")
 
@@ -185,9 +186,9 @@ class FuturesDataCollector:
 
                 # Логируем данные перед сохранением
                 logger.debug(f"Сохранение данных для {data['symbol']}: "
-                           f"OI_USD={futures_data['open_interest_usd']}, "
-                           f"Price_USD={futures_data['price_usd']}, "
-                           f"Volume_USD={futures_data['volume_usd']}")
+                             f"OI_USD={futures_data['open_interest_usd']}, "
+                             f"Price_USD={futures_data['price_usd']}, "
+                             f"Volume_USD={futures_data['volume_usd']}")
 
                 # Сохраняем в БД
                 await self.db.save_futures_data(futures_data)
@@ -199,6 +200,8 @@ class FuturesDataCollector:
 
         logger.info(f"Сохранено записей: {saved_count}, ошибок: {error_count}")
 
+        # Заменить метод run() в классе FuturesDataCollector в файле main.py на следующий:
+
     async def run(self):
         """Основной метод запуска сбора данных"""
         self.start_time = datetime.now()
@@ -208,27 +211,45 @@ class FuturesDataCollector:
             # Инициализация
             await self.initialize()
 
-            # Сбор данных с бирж параллельно
-            exchange_tasks = [
+            # Сбор данных о фьючерсах с бирж параллельно
+            futures_tasks = [
                 self.collect_exchange_data('Binance'),
                 self.collect_exchange_data('Bybit')
             ]
 
-            exchange_results = await asyncio.gather(*exchange_tasks, return_exceptions=True)
+            futures_results = await asyncio.gather(*futures_tasks, return_exceptions=True)
 
-            # Объединяем результаты
-            all_exchange_data = []
-            for result in exchange_results:
+            # Объединяем результаты по фьючерсам
+            all_futures_data = []
+            for result in futures_results:
                 if isinstance(result, Exception):
-                    logger.error(f"Ошибка при сборе данных с биржи: {result}")
+                    logger.error(f"Ошибка при сборе данных фьючерсов с биржи: {result}")
                 else:
-                    all_exchange_data.extend(result)
+                    all_futures_data.extend(result)
 
-            logger.info(f"Собрано данных с бирж: {len(all_exchange_data)} пар")
+            logger.info(f"Собрано данных по фьючерсам: {len(all_futures_data)} пар")
 
-            # Извлекаем уникальные символы токенов
+            # Сбор данных о спотовых парах с бирж параллельно
+            spot_tasks = [
+                self.collect_spot_exchange_data('Binance'),
+                self.collect_spot_exchange_data('Bybit')
+            ]
+
+            spot_results = await asyncio.gather(*spot_tasks, return_exceptions=True)
+
+            # Объединяем результаты по спотовым парам
+            all_spot_data = []
+            for result in spot_results:
+                if isinstance(result, Exception):
+                    logger.error(f"Ошибка при сборе спотовых данных с биржи: {result}")
+                else:
+                    all_spot_data.extend(result)
+
+            logger.info(f"Собрано спотовых данных: {len(all_spot_data)} пар")
+
+            # Извлекаем уникальные символы токенов из фьючерсных данных
             token_symbols = set()
-            for data in all_exchange_data:
+            for data in all_futures_data:
                 token_symbol = self.converter.extract_token_symbol(data['symbol'])
                 if token_symbol:
                     token_symbols.add(token_symbol)
@@ -239,18 +260,135 @@ class FuturesDataCollector:
             # Сбор данных с CoinMarketCap
             cmc_data = await self.collect_cmc_data(list(token_symbols))
 
-            # Обработка и сохранение данных
-            await self.process_and_save_data(all_exchange_data, cmc_data)
+            # Обработка и сохранение данных о фьючерсах
+            await self.process_and_save_data(all_futures_data, cmc_data)
+
+            # Обработка и сохранение спотовых данных
+            await self.process_and_save_spot_data(all_spot_data)
 
             # Статистика выполнения
             execution_time = (datetime.now() - self.start_time).total_seconds()
             logger.info(f"Сбор данных завершен за {execution_time:.2f} секунд")
+            logger.info(f"Обработано: {len(all_futures_data)} фьючерсных пар, {len(all_spot_data)} спотовых пар")
 
         except Exception as e:
             logger.error(f"Критическая ошибка при выполнении: {e}")
             raise
         finally:
             await self.cleanup()
+
+    async def collect_spot_exchange_data(self, exchange_name: str) -> List[Dict[str, Any]]:
+        """Сбор данных о спотовых парах с одной биржи"""
+        logger.info(f"Начало сбора спотовых данных с {exchange_name}")
+
+        try:
+            if exchange_name == 'Binance':
+                async with BinanceAPI() as api:
+                    pairs = await api.get_spot_pairs()
+
+                    tasks = []
+                    for pair in pairs:
+                        task = api.collect_spot_pair_data(pair['symbol'])
+                        tasks.append(task)
+
+                    batch_size = 50
+                    all_data = []
+
+                    for i in range(0, len(tasks), batch_size):
+                        batch = tasks[i:i + batch_size]
+                        batch_results = await asyncio.gather(*batch, return_exceptions=True)
+
+                        for result in batch_results:
+                            if isinstance(result, Exception):
+                                logger.error(f"Ошибка при сборе спотовых данных: {result}")
+                            else:
+                                all_data.append(result)
+
+                        if i + batch_size < len(tasks):
+                            await asyncio.sleep(1)
+
+                    return all_data
+
+            elif exchange_name == 'Bybit':
+                async with BybitAPI() as api:
+                    pairs = await api.get_spot_pairs()
+
+                    tasks = []
+                    for pair in pairs:
+                        task = api.collect_spot_pair_data(pair['symbol'])
+                        tasks.append(task)
+
+                    batch_size = 30
+                    all_data = []
+
+                    for i in range(0, len(tasks), batch_size):
+                        batch = tasks[i:i + batch_size]
+                        batch_results = await asyncio.gather(*batch, return_exceptions=True)
+
+                        for result in batch_results:
+                            if isinstance(result, Exception):
+                                logger.error(f"Ошибка при сборе спотовых данных: {result}")
+                            else:
+                                all_data.append(result)
+
+                        if i + batch_size < len(tasks):
+                            await asyncio.sleep(2)
+
+                    return all_data
+
+            else:
+                raise ValueError(f"Неизвестная биржа: {exchange_name}")
+
+        except Exception as e:
+            logger.error(f"Ошибка при сборе спотовых данных с {exchange_name}: {e}")
+            await self.db.save_api_error(exchange_name, 'collect_spot_data', 'ERROR', str(e))
+            return []
+
+    async def process_and_save_spot_data(self, spot_data: List[Dict[str, Any]]):
+        """Обработка и сохранение спотовых данных в БД"""
+        logger.info(f"Обработка и сохранение {len(spot_data)} спотовых записей")
+
+        saved_count = 0
+        error_count = 0
+
+        for data in spot_data:
+            try:
+                # Извлекаем символ токена из спотовой пары
+                token_symbol = self.converter.extract_token_from_spot_pair(data['symbol'])
+                if not token_symbol:
+                    continue
+
+                # Получаем или создаем токен
+                token_id = await self.db.get_or_create_token(token_symbol)
+
+                # Получаем или создаем пару с типом SPOT
+                pair_id = await self.db.get_or_create_futures_pair(
+                    token_id=token_id,
+                    exchange=data['exchange'],
+                    pair_symbol=data['symbol'],
+                    contract_type='SPOT'
+                )
+
+                # Подготавливаем данные для сохранения
+                spot_data_to_save = {
+                    'pair_id': pair_id,
+                    'volume_btc': data.get('volume_btc')
+                }
+
+                # Логируем данные перед сохранением
+                logger.debug(f"Сохранение спотовых данных для {data['symbol']}: "
+                             f"volume_btc={spot_data_to_save['volume_btc']}")
+
+                # Сохраняем в БД
+                await self.db.save_spot_data(spot_data_to_save)
+                saved_count += 1
+
+            except Exception as e:
+                logger.error(f"Ошибка при сохранении спотовых данных для {data.get('symbol')}: {e}")
+                error_count += 1
+
+        logger.info(f"Сохранено спотовых записей: {saved_count}, ошибок: {error_count}")
+
 
 async def main():
     """Точка входа в приложение"""
@@ -263,6 +401,7 @@ async def main():
     except Exception as e:
         logger.error(f"Неожиданная ошибка: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     # Запуск асинхронного приложения

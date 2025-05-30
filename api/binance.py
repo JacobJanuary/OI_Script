@@ -12,6 +12,7 @@ from utils.config import Config
 from utils.logger import logger
 from utils.converters import DataConverter
 
+
 class BinanceAPI:
     """Класс для работы с Binance Futures API"""
 
@@ -98,9 +99,8 @@ class BinanceAPI:
             futures_pairs = []
             for symbol in symbols:
                 if (symbol.get('status') == 'TRADING' and
-                    symbol.get('contractType') == 'PERPETUAL' and
-                    symbol.get('quoteAsset') in ['USDT', 'BUSD']):
-
+                        symbol.get('contractType') == 'PERPETUAL' and
+                        symbol.get('quoteAsset') in ['USDT', 'BUSD']):
                     futures_pairs.append({
                         'symbol': symbol['symbol'],
                         'baseAsset': symbol['baseAsset'],
@@ -199,3 +199,98 @@ class BinanceAPI:
             'volume_24h': ticker_data['quoteVolume'] if ticker_data else None,
             'trade_count_24h': ticker_data['count'] if ticker_data else None
         }
+
+    async def get_spot_exchange_info(self) -> Dict[str, Any]:
+        """Получить информацию о спотовой бирже"""
+        logger.info("Получение информации о спотовой бирже Binance")
+        return await self._make_spot_request('/api/v3/exchangeInfo')
+
+    async def get_spot_pairs(self) -> List[Dict[str, Any]]:
+        """Получить список всех спотовых пар к BTC"""
+        try:
+            exchange_info = await self.get_spot_exchange_info()
+            symbols = exchange_info.get('symbols', [])
+
+            # Фильтруем только активные пары с котировкой в BTC
+            spot_pairs = []
+            for symbol in symbols:
+                if (symbol.get('status') == 'TRADING' and
+                        symbol.get('quoteAsset') == 'BTC' and
+                        symbol.get('isSpotTradingAllowed') == True):
+                    spot_pairs.append({
+                        'symbol': symbol['symbol'],
+                        'baseAsset': symbol['baseAsset'],
+                        'quoteAsset': symbol['quoteAsset'],
+                        'contractType': 'SPOT'
+                    })
+
+            logger.info(f"Найдено {len(spot_pairs)} активных спотовых пар к BTC на Binance")
+            return spot_pairs
+
+        except Exception as e:
+            logger.error(f"Ошибка при получении списка спотовых пар Binance: {e}")
+            raise
+
+    async def get_spot_24hr_ticker(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Получить 24-часовую статистику по спотовому символу"""
+        try:
+            data = await self._make_spot_request('/api/v3/ticker/24hr', {'symbol': symbol})
+            return {
+                'symbol': symbol,
+                'volume': Decimal(data.get('volume', '0')),  # Объем в базовой валюте
+                'quoteVolume': Decimal(data.get('quoteVolume', '0')),  # Объем в BTC
+                'count': int(data.get('count', 0))
+            }
+        except Exception as e:
+            logger.error(f"Ошибка при получении 24hr ticker для спотовой пары {symbol}: {e}")
+            return None
+
+    async def collect_spot_pair_data(self, symbol: str) -> Dict[str, Any]:
+        """Собрать данные для одной спотовой пары"""
+        logger.debug(f"Сбор данных для спотовой пары Binance: {symbol}")
+
+        ticker_data = await self.get_spot_24hr_ticker(symbol)
+
+        return {
+            'exchange': 'Binance',
+            'symbol': symbol,
+            'volume_btc': ticker_data['quoteVolume'] if ticker_data else None,  # quoteVolume уже в BTC
+            'contract_type': 'SPOT'
+        }
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError))
+    )
+    async def _make_spot_request(self, endpoint: str, params: Optional[Dict] = None) -> Dict[str, Any]:
+        """Выполнение HTTP запроса к спотовому API с повторными попытками"""
+        # Спотовый API Binance использует другой базовый URL
+        spot_base_url = "https://api.binance.com"
+        url = f"{spot_base_url}{endpoint}"
+
+        async with self.rate_limiter:
+            try:
+                async with self.session.get(url, params=params) as response:
+                    if response.status == 429:
+                        retry_after = int(response.headers.get('Retry-After', 60))
+                        logger.warning(f"Binance spot rate limit exceeded. Waiting {retry_after} seconds")
+                        await asyncio.sleep(retry_after)
+                        raise aiohttp.ClientError("Rate limit exceeded")
+
+                    if response.status != 200:
+                        text = await response.text()
+                        logger.error(f"Binance Spot API error: {response.status} - {text}")
+                        raise aiohttp.ClientError(f"Spot API error: {response.status}")
+
+                    return await response.json()
+
+            except aiohttp.ClientConnectorCertificateError as e:
+                logger.error(f"SSL Certificate error при запросе к Binance Spot API: {e}")
+                raise
+            except asyncio.TimeoutError:
+                logger.error(f"Timeout при запросе к Binance Spot API: {endpoint}")
+                raise
+            except Exception as e:
+                logger.error(f"Ошибка при запросе к Binance Spot API: {e}")
+                raise

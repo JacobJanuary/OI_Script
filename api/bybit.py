@@ -250,3 +250,68 @@ class BybitAPI:
             'price': ticker_data['lastPrice'] if ticker_data else None,
             'volume_24h': ticker_data['turnover24h'] if ticker_data else None  # turnover24h это объем в USD
         }
+
+# Добавить эти методы в класс BybitAPI в файле api/bybit.py
+
+    async def get_spot_pairs(self) -> List[Dict[str, Any]]:
+        """Получить список всех спотовых пар к BTC"""
+        try:
+            instruments = await self.get_instruments_info('spot')
+
+            spot_pairs = []
+            for instrument in instruments:
+                if (instrument.get('status') == 'Trading' and
+                    instrument.get('quoteCoin') == 'BTC'):
+
+                    spot_pairs.append({
+                        'symbol': instrument['symbol'],
+                        'baseCoin': instrument['baseCoin'],
+                        'quoteCoin': instrument['quoteCoin'],
+                        'contractType': 'SPOT'
+                    })
+
+            logger.info(f"Найдено {len(spot_pairs)} активных спотовых пар к BTC на Bybit")
+            return spot_pairs
+
+        except Exception as e:
+            logger.error(f"Ошибка при получении списка спотовых пар Bybit: {e}")
+            raise
+
+    async def get_spot_ticker(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Получить данные тикера для спотовой пары"""
+        try:
+            params = {
+                'category': 'spot',
+                'symbol': symbol
+            }
+
+            data = await self._make_request('/v5/market/tickers', params)
+            tickers = data.get('list', [])
+
+            if tickers:
+                ticker = tickers[0]
+                return {
+                    'symbol': symbol,
+                    'lastPrice': Decimal(ticker.get('lastPrice', '0')),
+                    'volume24h': Decimal(ticker.get('volume24h', '0')),  # Объем в базовой валюте
+                    'turnover24h': Decimal(ticker.get('turnover24h', '0'))  # Объем в котируемой валюте (BTC)
+                }
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Ошибка при получении spot ticker для {symbol}: {e}")
+            return None
+
+    async def collect_spot_pair_data(self, symbol: str) -> Dict[str, Any]:
+        """Собрать данные для одной спотовой пары"""
+        logger.debug(f"Сбор данных для спотовой пары Bybit: {symbol}")
+
+        ticker_data = await self.get_spot_ticker(symbol)
+
+        return {
+            'exchange': 'Bybit',
+            'symbol': symbol,
+            'volume_btc': ticker_data['turnover24h'] if ticker_data else None,  # turnover24h уже в BTC для пар к BTC
+            'contract_type': 'SPOT'
+        }

@@ -60,3 +60,18 @@ class DataConverter:
     def normalize_symbol(symbol: str) -> str:
         """Нормализация символа токена (приведение к верхнему регистру)"""
         return symbol.upper().strip()
+
+    # Добавить этот метод в класс DataConverter в файле utils/converters.py
+
+    @staticmethod
+    def extract_token_from_spot_pair(pair_symbol: str) -> Optional[str]:
+        """
+        Извлечение символа токена из спотовой пары к BTC
+        Например: ETHBTC -> ETH, BNBBTC -> BNB
+        """
+        if pair_symbol.endswith('BTC') and len(pair_symbol) > 3:
+            return pair_symbol[:-3]
+
+        # Если формат не соответствует ожидаемому
+        logger.warning(f"Не удалось извлечь символ токена из спотовой пары: {pair_symbol}")
+        return None
