@@ -44,6 +44,15 @@ CREATE TABLE IF NOT EXISTS futures_data (
     INDEX idx_pair_id (pair_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS spot_data (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    pair_id INT NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    volume_btc DECIMAL(18, 8) COMMENT 'Объем торгов в BTC',
+    FOREIGN KEY (pair_id) REFERENCES futures_pairs(id) ON DELETE CASCADE,
+    INDEX idx_timestamp (timestamp),
+    INDEX idx_pair_timestamp (pair_id, timestamp)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- Таблица ошибок API
 CREATE TABLE IF NOT EXISTS api_errors (
     id INT AUTO_INCREMENT PRIMARY KEY,
